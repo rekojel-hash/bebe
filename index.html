@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0e1a" />
+  <meta name="description" content="BébéLog — Votre compagnon pour la gestion quotidienne de votre nouveau-né" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="BébéLog" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- Apple Touch Icons -->
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png" />
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <title>BébéLog 👶</title>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: #0a0e1a;
+      color: #dce6f8;
+      font-family: 'Nunito', sans-serif;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #root {
+      height: 100%;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    /* Hide scrollbars globally */
+    ::-webkit-scrollbar { display: none; }
+    scrollbar-width: none;
+    /* iOS safe area support */
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+    /* Install banner */
+    #install-banner {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: linear-gradient(135deg, #1a2340, #0f1830);
+      border-top: 1px solid #2a3f6a;
+      padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+      z-index: 999;
+      flex-direction: row;
+      align-items: center;
+      gap: 12px;
+      animation: slideUp 0.3s ease;
+    }
+    #install-banner.show { display: flex; }
+    #install-banner .ib-icon { font-size: 28px; flex-shrink: 0; }
+    #install-banner .ib-text { flex: 1; font-size: 13px; color: #8ca0c0; }
+    #install-banner .ib-text strong { color: #dce6f8; display: block; font-size: 14px; margin-bottom: 2px; }
+    #install-banner button {
+      padding: 9px 16px; border-radius: 10px; border: none; cursor: pointer;
+      font-family: inherit; font-weight: 700; font-size: 13px;
+    }
+    #install-banner .ib-yes { background: linear-gradient(135deg, #5b8dee, #7c6bf0); color: #fff; }
+    #install-banner .ib-no  { background: transparent; color: #4a5a78; }
+
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+    /* Splash screen */
+    #splash {
+      position: fixed; inset: 0; background: #0a0e1a;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999; transition: opacity 0.4s ease;
+    }
+    #splash.fade { opacity: 0; pointer-events: none; }
+    #splash .sp-emoji { font-size: 72px; animation: pulse 1.2s infinite; }
+    #splash .sp-title { font-size: 28px; font-weight: 900; margin-top: 16px; letter-spacing: -0.5px; }
+    #splash .sp-sub { font-size: 14px; color: #5b8dee; margin-top: 6px; font-weight: 600; }
+    @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+  </style>
+</head>
+<body>
+
+<!-- Splash Screen -->
+<div id="splash">
+  <div class="sp-emoji">👶</div>
+  <div class="sp-title">BébéLog</div>
+  <div class="sp-sub">Chargement…</div>
+</div>
+
+<!-- Install PWA Banner -->
+<div id="install-banner">
+  <div class="ib-icon">📲</div>
+  <div class="ib-text">
+    <strong>Installer BébéLog</strong>
+    Ajoutez l'app sur votre écran d'accueil pour un accès rapide, même hors ligne !
+  </div>
+  <button class="ib-no" id="install-dismiss">Plus tard</button>
+  <button class="ib-yes" id="install-btn">Installer</button>
+</div>
+
+<div id="root"></div>
+
+<!-- React + Babel CDN -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+// ─── Constants ───────────────────────────────────────────────────────────────
+const { useState, useEffect, useRef } = React;
+const BTC_ADDRESS = "bc1q07ex3srpj8n0eud30qtu4f7nv9ydnp3gpqkz9lrgpjxud5288fhqrv7urd";
+const KOFI_URL    = "https://ko-fi.com/rekojel";
+const STORAGE_KEY = "bebelog_data_v1";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function nowISO() { return new Date().toISOString(); }
+function fmtTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+function fmtDate(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+}
+function fmtDuration(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h${String(m).padStart(2,"0")}`;
+  if (m > 0) return `${m}min${String(s).padStart(2,"0")}s`;
+  return `${s}s`;
+}
+function getAge(birthDate) {
+  if (!birthDate) return null;
+  const days = Math.floor((Date.now() - new Date(birthDate)) / 86400000);
+  if (days < 7)  return `${days} jour${days > 1 ? "s" : ""}`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 9) return `${weeks} semaine${weeks > 1 ? "s" : ""}`;
+  const months = Math.floor(days / 30.44);
+  if (months < 24) return `${months} mois`;
+  const years = Math.floor(months / 12);
+  const rem = months % 12;
+  return rem > 0 ? `${years} an${years>1?"s":""} et ${rem} mois` : `${years} an${years>1?"s":""}`;
+}
+function isToday(iso) { return new Date(iso).toDateString() === new Date().toDateString(); }
+
+// ─── Initial state ────────────────────────────────────────────────────────────
+const INITIAL = {
+  babyName: "Mon Bébé", birthDate: "",
+  feeds: [], sleeps: [], diapers: [], weights: [], temps: [], notes: [],
+  growths: [], medicines: [], vaccines: [], milestones: [], activities: [],
+  checklist: {
+    daily: [
+      { id:1,  label:"Biberon / Allaitement matin",        done:false, icon:"🍼" },
+      { id:2,  label:"Change couche matin",                done:false, icon:"💩" },
+      { id:3,  label:"Éveil / Tummy time matin",           done:false, icon:"🧸" },
+      { id:4,  label:"Sieste du matin",                    done:false, icon:"😴" },
+      { id:5,  label:"Biberon / Allaitement midi",         done:false, icon:"🍼" },
+      { id:6,  label:"Change couche après-midi",           done:false, icon:"💩" },
+      { id:7,  label:"Promenade / Air frais",              done:false, icon:"🌤️" },
+      { id:8,  label:"Sieste de l'après-midi",             done:false, icon:"😴" },
+      { id:9,  label:"Biberon / Allaitement goûter",       done:false, icon:"🍼" },
+      { id:10, label:"Bain du soir",                       done:false, icon:"🛁" },
+      { id:11, label:"Massage bébé",                       done:false, icon:"🤲" },
+      { id:12, label:"Biberon / Allaitement soir",         done:false, icon:"🍼" },
+      { id:13, label:"Rituel coucher (berceuse, histoire)",done:false, icon:"🌙" },
+      { id:14, label:"Médicaments si prescrit",            done:false, icon:"💊" },
+    ],
+    weekly: [
+      { id:20, label:"Peser le bébé",                        done:false, icon:"⚖️" },
+      { id:21, label:"Mesurer la taille",                    done:false, icon:"📏" },
+      { id:22, label:"Soin du nombril / cordon",             done:false, icon:"🩹" },
+      { id:23, label:"Couper les ongles",                    done:false, icon:"✂️" },
+      { id:24, label:"Nettoyer et stériliser les biberons",  done:false, icon:"♻️" },
+      { id:25, label:"Laver les jouets & doudous",           done:false, icon:"🧸" },
+      { id:26, label:"Appel sage-femme / pédiatre si besoin",done:false, icon:"👩‍⚕️" },
+    ],
+    milestonesList: [
+      { id:30, label:"Rendez-vous J8 (sage-femme)",       done:false, icon:"📅" },
+      { id:31, label:"Rendez-vous 1 mois (pédiatre)",     done:false, icon:"📅" },
+      { id:32, label:"Vaccins 2 mois",                    done:false, icon:"💉" },
+      { id:33, label:"Vaccins 4 mois",                    done:false, icon:"💉" },
+      { id:34, label:"Vaccins 5 mois",                    done:false, icon:"💉" },
+      { id:35, label:"Vaccins 11 mois",                   done:false, icon:"💉" },
+      { id:36, label:"Rendez-vous 9 mois (pédiatre)",     done:false, icon:"📅" },
+      { id:37, label:"Inscription crèche",                done:false, icon:"🏠" },
+      { id:38, label:"Rendez-vous 24 mois (pédiatre)",    done:false, icon:"📅" },
+      { id:39, label:"Inscription école maternelle",      done:false, icon:"🎒" },
+    ]
+  }
+};
+
+// ─── Timer Hook ───────────────────────────────────────────────────────────────
+function useTimer() {
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(null);
+  const intRef   = useRef(null);
+  const start = () => {
+    startRef.current = Date.now() - elapsed * 1000;
+    intRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+    setRunning(true);
+  };
+  const stop  = () => { clearInterval(intRef.current); setRunning(false); };
+  const reset = () => { stop(); setElapsed(0); };
+  useEffect(() => () => clearInterval(intRef.current), []);
+  return { running, elapsed, start, stop, reset };
+}
+
+// ─── Theme ───────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#0a0e1a", surface:"#131929", surfaceHigh:"#1a2340",
+  border:"#1e2d4a", borderAccent:"#2a3f6a",
+  accent:"#5b8dee", accentSoft:"rgba(91,141,238,0.15)",
+  accentGreen:"#4ecb7e", accentOrange:"#f5a623",
+  accentRed:"#ff5f6d", accentPink:"#ff6fb0", accentPurple:"#a78bfa",
+  text:"#dce6f8", textMid:"#8ca0c0", textDim:"#4a5a78",
+};
+const S = {
+  app:{ fontFamily:"'Nunito',sans-serif", background:C.bg, height:"100dvh", maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", color:C.text, overflow:"hidden" },
+  header:{ background:`linear-gradient(160deg,#0f1830 0%,${C.bg} 100%)`, padding:"env(safe-area-inset-top,14px) 18px 0 18px", borderBottom:`1px solid ${C.border}`, flexShrink:0 },
+  headerTop:{ display:"flex", alignItems:"center", gap:10, marginBottom:12 },
+  headerLogo:{ fontSize:30 },
+  headerTitle:{ fontSize:19, fontWeight:800, letterSpacing:"-0.5px" },
+  headerSub:{ fontSize:11, color:C.textMid, marginTop:1 },
+  navRow:{ display:"flex", gap:0, overflowX:"auto" },
+  navBtn:{ flex:"0 0 auto", padding:"10px 12px", border:"none", background:"transparent", color:C.textDim, fontSize:11, fontWeight:700, cursor:"pointer", borderBottom:"3px solid transparent", transition:"all 0.2s", fontFamily:"inherit", whiteSpace:"nowrap" },
+  navBtnActive:{ color:C.accent, borderBottomColor:C.accent },
+  scroll:{ flex:1, overflowY:"auto", paddingBottom:"env(safe-area-inset-bottom,0px)" },
+  page:{ padding:14, display:"flex", flexDirection:"column", gap:12 },
+  card:{ background:C.surface, borderRadius:16, padding:16, border:`1px solid ${C.border}` },
+  cardGlow:{ background:`linear-gradient(135deg,${C.surfaceHigh} 0%,${C.surface} 100%)`, borderRadius:16, padding:16, border:`1px solid ${C.borderAccent}` },
+  secTitle:{ fontSize:11, fontWeight:700, color:C.textMid, textTransform:"uppercase", letterSpacing:1.2, marginTop:2 },
+  label:{ display:"block", fontSize:12, color:C.textMid, marginBottom:6, fontWeight:700 },
+  input:{ width:"100%", background:"#060b15", border:`1px solid ${C.borderAccent}`, borderRadius:10, padding:"11px 12px", color:C.text, fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none" },
+  textarea:{ width:"100%", background:"#060b15", border:`1px solid ${C.borderAccent}`, borderRadius:10, padding:"11px 12px", color:C.text, fontSize:14, fontFamily:"inherit", boxSizing:"border-box", outline:"none", minHeight:90, resize:"none" },
+  typeRow:{ display:"flex", flexWrap:"wrap", gap:7, marginTop:4 },
+  chip:{ padding:"7px 13px", borderRadius:10, border:`1px solid ${C.borderAccent}`, background:"transparent", color:C.textMid, fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:600, transition:"all 0.15s" },
+  chipActive:{ background:C.accentSoft, borderColor:C.accent, color:C.accent },
+  btn:{ width:"100%", background:`linear-gradient(135deg,${C.accent},#7c6bf0)`, border:"none", borderRadius:12, padding:"13px", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", marginTop:6, letterSpacing:"0.3px" },
+  btnOutline:{ width:"100%", background:"transparent", border:`1px solid ${C.borderAccent}`, borderRadius:12, padding:"12px", color:C.textMid, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", marginTop:4 },
+  btnDanger:{ background:`linear-gradient(135deg,${C.accentRed},#c94b4b)` },
+  btnGreen:{ background:`linear-gradient(135deg,${C.accentGreen},#2ecc71)` },
+  btnOrange:{ background:`linear-gradient(135deg,${C.accentOrange},#e87d1e)` },
+  logRow:{ background:C.surface, borderRadius:13, padding:"12px 14px", display:"flex", alignItems:"center", gap:12, border:`1px solid ${C.border}` },
+  logIcon:{ fontSize:22, flexShrink:0, width:32, textAlign:"center" },
+  logInfo:{ flex:1 },
+  logTitle:{ fontSize:13, fontWeight:700, color:C.text },
+  logSub:{ fontSize:11, color:C.textMid, marginTop:2 },
+  delBtn:{ background:"transparent", border:"none", cursor:"pointer", fontSize:16, padding:4, color:C.textDim },
+  empty:{ textAlign:"center", color:C.textDim, fontSize:13, padding:"20px 0" },
+  alert:{ background:"rgba(255,95,109,0.1)", border:"1px solid rgba(255,95,109,0.3)", borderRadius:10, padding:12, color:C.accentRed, fontSize:13, marginBottom:8 },
+  success:{ background:"rgba(78,203,126,0.1)", border:"1px solid rgba(78,203,126,0.3)", borderRadius:10, padding:12, color:C.accentGreen, fontSize:13, marginBottom:8 },
+  progressBar:{ height:8, background:"#060b15", borderRadius:99, overflow:"hidden", marginTop:6 },
+  progressFill:{ height:"100%", borderRadius:99, transition:"width 0.4s ease" },
+  statGrid:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:9 },
+  statCard:{ background:C.surface, borderRadius:14, padding:"14px 10px", textAlign:"center", border:`1px solid ${C.border}` },
+};
+
+// ─── Shared Components ────────────────────────────────────────────────────────
+function TimerWidget({ onSave }) {
+  const { running, elapsed, start, stop, reset } = useTimer();
+  const [saved, setSaved] = useState(null);
+  const handleStop = () => { stop(); if(elapsed>0){onSave&&onSave(elapsed);setSaved(elapsed);} };
+  const fmt = s => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+  return (
+    <div style={{background:"#060b15",borderRadius:12,padding:"12px 14px",border:`1px solid ${C.borderAccent}`,display:"flex",alignItems:"center",gap:12}}>
+      <div style={{fontSize:24,fontWeight:800,color:C.accent,flex:1,fontVariantNumeric:"tabular-nums"}}>{fmt(elapsed)}</div>
+      {saved && <div style={{fontSize:12,color:C.accentGreen}}>✓ {fmtDuration(saved)}</div>}
+      {!running
+        ? <button style={{...S.chip,...S.chipActive}} onClick={start}>▶ Start</button>
+        : <><button style={{...S.chip,background:"rgba(255,95,109,0.15)",borderColor:C.accentRed,color:C.accentRed}} onClick={handleStop}>⏹ Stop</button>
+           <button style={S.chip} onClick={()=>{reset();setSaved(null);}}>↺</button></>}
+    </div>
+  );
+}
+function FieldRow({label,children}){ return <div style={{marginBottom:12}}><label style={S.label}>{label}</label>{children}</div>; }
+function ChipGroup({options,value,onChange}){
+  return <div style={S.typeRow}>{options.map(o=><button key={o} style={{...S.chip,...(value===o?S.chipActive:{})}} onClick={()=>onChange(o)}>{o}</button>)}</div>;
+}
+function LogItem({icon,title,sub,onDelete,color}){
+  return (
+    <div style={S.logRow}>
+      <div style={{...S.logIcon,color:color||"inherit"}}>{icon}</div>
+      <div style={S.logInfo}>
+        <div style={{...S.logTitle,color:color||C.text}}>{title}</div>
+        <div style={S.logSub}>{sub}</div>
+      </div>
+      {onDelete&&<button style={S.delBtn} onClick={onDelete}>🗑</button>}
+    </div>
+  );
+}
+
+// ─── HOME ─────────────────────────────────────────────────────────────────────
+function HomeTab({data,setData}){
+  const [editing,setEditing]=useState(false);
+  const [name,setName]=useState(data.babyName);
+  const [birth,setBirth]=useState(data.birthDate);
+  const age=getAge(data.birthDate);
+  const todayFeeds=data.feeds.filter(f=>isToday(f.time)).length;
+  const todayDiapers=data.diapers.filter(d=>isToday(d.time)).length;
+  const todaySleeps=data.sleeps.filter(s=>s.end&&isToday(s.start)).length;
+  const activeSleep=data.sleeps.find(s=>!s.end);
+  const lastFeed=data.feeds[data.feeds.length-1];
+  const lastDiaper=data.diapers[data.diapers.length-1];
+  const lastWeight=data.weights[data.weights.length-1];
+  const lastTemp=data.temps[data.temps.length-1];
+  return (
+    <div style={S.page}>
+      <div style={{...S.cardGlow,textAlign:"center",padding:"24px 16px"}}>
+        <div style={{fontSize:54,marginBottom:10}}>👶</div>
+        {editing?(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <input style={S.input} value={name} onChange={e=>setName(e.target.value)} placeholder="Prénom du bébé"/>
+            <input style={S.input} type="date" value={birth} onChange={e=>setBirth(e.target.value)}/>
+            <button style={S.btn} onClick={()=>{setData(d=>({...d,babyName:name,birthDate:birth}));setEditing(false);}}>✓ Enregistrer</button>
+          </div>
+        ):(
+          <>
+            <div style={{fontSize:23,fontWeight:800}}>{data.babyName}</div>
+            {age&&<div style={{fontSize:14,color:C.accent,fontWeight:700,marginTop:4}}>🎂 {age}</div>}
+            <button style={{...S.chip,marginTop:12,fontSize:12}} onClick={()=>{setName(data.babyName);setBirth(data.birthDate);setEditing(true);}}>✏️ Modifier le profil</button>
+          </>
+        )}
+      </div>
+      <div style={S.statGrid}>
+        <div style={S.statCard}><div style={{fontSize:20,marginBottom:5}}>🍼</div><div style={{fontSize:22,fontWeight:800}}>{todayFeeds}</div><div style={{fontSize:10,color:C.textMid,marginTop:2}}>repas</div></div>
+        <div style={S.statCard}><div style={{fontSize:20,marginBottom:5}}>💩</div><div style={{fontSize:22,fontWeight:800}}>{todayDiapers}</div><div style={{fontSize:10,color:C.textMid,marginTop:2}}>couches</div></div>
+        <div style={S.statCard}><div style={{fontSize:20,marginBottom:5}}>😴</div><div style={{fontSize:22,fontWeight:800}}>{todaySleeps}</div><div style={{fontSize:10,color:C.textMid,marginTop:2}}>siestes</div></div>
+      </div>
+      <div style={S.secTitle}>Actions rapides</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+        <button style={{...S.btn,marginTop:0,fontSize:13}} onClick={()=>setData(d=>({...d,feeds:[...d.feeds,{id:Date.now(),time:nowISO(),type:"Biberon",amount:""}]}))}>🍼 Repas rapide</button>
+        <button style={{...S.btn,marginTop:0,fontSize:13,...S.btnOrange}} onClick={()=>setData(d=>({...d,diapers:[...d.diapers,{id:Date.now(),time:nowISO(),type:"Mixte"}]}))}>💩 Couche rapide</button>
+        <button style={{...S.btn,marginTop:0,fontSize:13,background:activeSleep?`linear-gradient(135deg,${C.accentRed},#c94b4b)`:`linear-gradient(135deg,${C.accentPurple},#7c6bf0)`}}
+          onClick={()=>{if(activeSleep)setData(d=>({...d,sleeps:d.sleeps.map(s=>s.id===activeSleep.id?{...s,end:nowISO()}:s)}));else setData(d=>({...d,sleeps:[...d.sleeps,{id:Date.now(),start:nowISO(),end:null}]}));}}>
+          {activeSleep?"⏹ Fin sieste":"😴 Début sieste"}
+        </button>
+        <button style={{...S.btn,marginTop:0,fontSize:13,background:`linear-gradient(135deg,${C.accentPink},#e060a0)`}} onClick={()=>setData(d=>({...d,activities:[...d.activities,{id:Date.now(),time:nowISO(),type:"Éveil",note:""}]}))}>🧸 Éveil</button>
+      </div>
+      <div style={S.secTitle}>Dernières activités</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {lastFeed&&<LogItem icon="🍼" title={`${lastFeed.type}${lastFeed.amount?" · "+lastFeed.amount+"ml":""}`} sub={`${fmtDate(lastFeed.time)} à ${fmtTime(lastFeed.time)}`}/>}
+        {lastDiaper&&<LogItem icon="💩" title={lastDiaper.type} sub={`${fmtDate(lastDiaper.time)} à ${fmtTime(lastDiaper.time)}`}/>}
+        {activeSleep&&<LogItem icon="💤" title="Sieste en cours…" sub={`Depuis ${fmtTime(activeSleep.start)}`} color={C.accentPurple}/>}
+        {lastWeight&&<LogItem icon="⚖️" title={`${lastWeight.value} kg`} sub={fmtDate(lastWeight.time)}/>}
+        {lastTemp&&<LogItem icon="🌡️" title={`${lastTemp.value}°C${lastTemp.value>=38?" ⚠️":""}`} sub={fmtDate(lastTemp.time)} color={lastTemp.value>=38?C.accentRed:undefined}/>}
+        {!lastFeed&&!lastDiaper&&<div style={S.empty}>Aucune activité pour l'instant 🌟</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── FEED ─────────────────────────────────────────────────────────────────────
+function FeedTab({data,setData}){
+  const [type,setType]=useState("Biberon");
+  const [amount,setAmount]=useState("");
+  const [side,setSide]=useState("Gauche");
+  const [timerVal,setTimerVal]=useState(null);
+  const [note,setNote]=useState("");
+  const add=()=>{
+    setData(d=>({...d,feeds:[...d.feeds,{id:Date.now(),time:nowISO(),type,amount,side:type==="Allaitement"?side:null,duration:timerVal,note}]}));
+    setAmount("");setTimerVal(null);setNote("");
+  };
+  const todayFeeds=data.feeds.filter(f=>isToday(f.time));
+  return (
+    <div style={S.page}>
+      <div style={S.card}>
+        <FieldRow label="Type de repas"><ChipGroup options={["Biberon","Allaitement","Mixte","Solides","Eau"]} value={type} onChange={setType}/></FieldRow>
+        {(type==="Biberon"||type==="Mixte")&&<FieldRow label="Quantité (ml)"><input style={S.input} type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Ex : 120"/></FieldRow>}
+        {type==="Allaitement"&&<>
+          <FieldRow label="Côté"><ChipGroup options={["Gauche","Droit","Les deux"]} value={side} onChange={setSide}/></FieldRow>
+          <FieldRow label="Durée"><TimerWidget onSave={s=>setTimerVal(s)}/></FieldRow>
+        </>}
+        {type==="Solides"&&<FieldRow label="Description"><input style={S.input} value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex : compote pomme, purée carotte…"/></FieldRow>}
+        <button style={S.btn} onClick={add}>✅ Enregistrer ce repas</button>
+      </div>
+      <div style={S.secTitle}>Aujourd'hui · {todayFeeds.length} repas</div>
+      {todayFeeds.length===0&&<div style={S.empty}>Aucun repas aujourd'hui</div>}
+      {[...todayFeeds].reverse().map(f=>(
+        <LogItem key={f.id}
+          icon={f.type==="Biberon"?"🍼":f.type==="Allaitement"?"🤱":f.type==="Solides"?"🥣":"💧"}
+          title={`${f.type}${f.amount?" · "+f.amount+"ml":""}`}
+          sub={`${fmtTime(f.time)}${f.side?" · "+f.side:""}${f.duration?" · "+fmtDuration(f.duration):""}${f.note?" · "+f.note:""}`}
+          onDelete={()=>setData(d=>({...d,feeds:d.feeds.filter(x=>x.id!==f.id)}))}/>
+      ))}
+    </div>
+  );
+}
+
+// ─── SLEEP ────────────────────────────────────────────────────────────────────
+function SleepTab({data,setData}){
+  const activeSleep=data.sleeps.find(s=>!s.end);
+  const [elapsed,setElapsed]=useState(0);
+  useEffect(()=>{
+    if(!activeSleep){setElapsed(0);return;}
+    const iv=setInterval(()=>setElapsed(Math.floor((Date.now()-new Date(activeSleep.start))/1000)),1000);
+    return()=>clearInterval(iv);
+  },[activeSleep?.id]);
+  const todaySleeps=data.sleeps.filter(s=>s.end&&isToday(s.start));
+  const totalSleep=todaySleeps.reduce((a,s)=>a+(new Date(s.end)-new Date(s.start))/1000,0);
+  return (
+    <div style={S.page}>
+      <div style={{...S.cardGlow,textAlign:"center",padding:"28px 16px"}}>
+        {activeSleep?(
+          <>
+            <div style={{fontSize:50}}>💤</div>
+            <div style={{fontSize:42,fontWeight:800,color:C.accentPurple,fontVariantNumeric:"tabular-nums",marginTop:6}}>{fmtDuration(elapsed)}</div>
+            <div style={{fontSize:13,color:C.textMid,marginTop:6,marginBottom:16}}>En cours depuis {fmtTime(activeSleep.start)}</div>
+            <button style={{...S.btn,...S.btnDanger}} onClick={()=>setData(d=>({...d,sleeps:d.sleeps.map(s=>s.id===activeSleep.id?{...s,end:nowISO()}:s)}))}>⏹ Terminer le sommeil</button>
+          </>
+        ):(
+          <>
+            <div style={{fontSize:50}}>☀️</div>
+            <div style={{fontSize:16,color:C.textMid,marginBottom:16}}>Bébé est éveillé</div>
+            <button style={{...S.btn,...S.btnGreen}} onClick={()=>setData(d=>({...d,sleeps:[...d.sleeps,{id:Date.now(),start:nowISO(),end:null}]}))}>🌙 Démarrer le sommeil</button>
+          </>
+        )}
+      </div>
+      {todaySleeps.length>0&&<div style={S.card}><div style={{fontSize:12,color:C.textMid,marginBottom:4}}>Sommeil total aujourd'hui</div><div style={{fontSize:30,fontWeight:800,color:C.accent}}>{fmtDuration(totalSleep)}</div></div>}
+      <div style={S.secTitle}>Historique</div>
+      {data.sleeps.length===0&&<div style={S.empty}>Aucun sommeil enregistré</div>}
+      {[...data.sleeps].reverse().slice(0,15).map(s=>(
+        <LogItem key={s.id} icon={s.end?"🌙":"💤"}
+          title={`${fmtDate(s.start)} · ${fmtTime(s.start)}`}
+          sub={s.end?`→ ${fmtTime(s.end)} · ${fmtDuration((new Date(s.end)-new Date(s.start))/1000)}`:"En cours…"}
+          color={!s.end?C.accentPurple:undefined}
+          onDelete={()=>setData(d=>({...d,sleeps:d.sleeps.filter(x=>x.id!==s.id)}))}/>
+      ))}
+    </div>
+  );
+}
+
+// ─── HEALTH ───────────────────────────────────────────────────────────────────
+function HealthTab({data,setData}){
+  const [sub,setSub]=useState("couche");
+  const [dType,setDType]=useState("Mixte");
+  const [weight,setWeight]=useState("");
+  const [height,setHeight]=useState("");
+  const [temp,setTemp]=useState("");
+  const [medName,setMedName]=useState("");const [medDose,setMedDose]=useState("");const [medNote,setMedNote]=useState("");
+  const [vacName,setVacName]=useState("");const [vacNote,setVacNote]=useState("");
+  const [note,setNote]=useState("");
+  const subs=[{k:"couche",l:"💩"},{k:"poids",l:"⚖️"},{k:"taille",l:"📏"},{k:"temp",l:"🌡️"},{k:"medic",l:"💊"},{k:"vaccin",l:"💉"},{k:"notes",l:"📝"}];
+  return (
+    <div style={S.page}>
+      <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:4}}>
+        {subs.map(t=><button key={t.k} style={{...S.chip,flex:"0 0 auto",fontSize:16,padding:"8px 12px",...(sub===t.k?S.chipActive:{})}} onClick={()=>setSub(t.k)}>{t.l}</button>)}
+      </div>
+      {sub==="couche"&&<>
+        <div style={S.card}><FieldRow label="Type"><ChipGroup options={["Urine","Selles","Mixte","Sèche"]} value={dType} onChange={setDType}/></FieldRow>
+        <button style={S.btn} onClick={()=>setData(d=>({...d,diapers:[...d.diapers,{id:Date.now(),time:nowISO(),type:dType}]}))}>✅ Enregistrer</button></div>
+        <div style={S.secTitle}>Couches du jour</div>
+        {data.diapers.filter(d=>isToday(d.time)).length===0&&<div style={S.empty}>Aucune couche aujourd'hui</div>}
+        {[...data.diapers].filter(d=>isToday(d.time)).reverse().map(d=><LogItem key={d.id} icon="💩" title={d.type} sub={fmtTime(d.time)} onDelete={()=>setData(dd=>({...dd,diapers:dd.diapers.filter(x=>x.id!==d.id)}))}/>)}
+      </>}
+      {sub==="poids"&&<>
+        <div style={S.card}><FieldRow label="Poids (kg)"><input style={S.input} type="number" step="0.01" value={weight} onChange={e=>setWeight(e.target.value)} placeholder="Ex : 3.45"/></FieldRow>
+        <button style={S.btn} onClick={()=>{if(!weight)return;setData(d=>({...d,weights:[...d.weights,{id:Date.now(),time:nowISO(),value:parseFloat(weight)}]}));setWeight("");}}>✅ Enregistrer</button></div>
+        <div style={S.secTitle}>Courbe de poids</div>
+        {data.weights.length===0&&<div style={S.empty}>Aucune mesure</div>}
+        {[...data.weights].reverse().map(w=><LogItem key={w.id} icon="⚖️" title={`${w.value} kg`} sub={`${fmtDate(w.time)} · ${fmtTime(w.time)}`} onDelete={()=>setData(d=>({...d,weights:d.weights.filter(x=>x.id!==w.id)}))}/>)}
+      </>}
+      {sub==="taille"&&<>
+        <div style={S.card}><FieldRow label="Taille (cm)"><input style={S.input} type="number" step="0.1" value={height} onChange={e=>setHeight(e.target.value)} placeholder="Ex : 51.5"/></FieldRow>
+        <button style={S.btn} onClick={()=>{if(!height)return;setData(d=>({...d,growths:[...d.growths,{id:Date.now(),time:nowISO(),value:parseFloat(height)}]}));setHeight("");}}>✅ Enregistrer</button></div>
+        <div style={S.secTitle}>Historique taille</div>
+        {(data.growths||[]).length===0&&<div style={S.empty}>Aucune mesure</div>}
+        {[...(data.growths||[])].reverse().map(g=><LogItem key={g.id} icon="📏" title={`${g.value} cm`} sub={`${fmtDate(g.time)} · ${fmtTime(g.time)}`} onDelete={()=>setData(d=>({...d,growths:d.growths.filter(x=>x.id!==g.id)}))}/>)}
+      </>}
+      {sub==="temp"&&<>
+        <div style={S.card}>
+          <FieldRow label="Température (°C)"><input style={S.input} type="number" step="0.1" value={temp} onChange={e=>setTemp(e.target.value)} placeholder="Ex : 37.2"/></FieldRow>
+          {temp&&parseFloat(temp)>=38&&<div style={S.alert}>⚠️ Fièvre ({temp}°C) — consultez votre pédiatre si elle persiste.</div>}
+          {temp&&parseFloat(temp)>=39&&<div style={{...S.alert,background:"rgba(255,50,50,0.15)"}}>🚨 Fièvre élevée ! Consultez un médecin rapidement.</div>}
+          <button style={S.btn} onClick={()=>{if(!temp)return;setData(d=>({...d,temps:[...d.temps,{id:Date.now(),time:nowISO(),value:parseFloat(temp)}]}));setTemp("");}}>✅ Enregistrer</button>
+        </div>
+        <div style={S.secTitle}>Historique</div>
+        {data.temps.length===0&&<div style={S.empty}>Aucune mesure</div>}
+        {[...data.temps].reverse().map(t=><LogItem key={t.id} icon="🌡️" title={`${t.value}°C ${t.value>=38?"⚠️":"✅"}`} sub={`${fmtDate(t.time)} · ${fmtTime(t.time)}`} color={t.value>=38?C.accentRed:C.accentGreen} onDelete={()=>setData(d=>({...d,temps:d.temps.filter(x=>x.id!==t.id)}))}/>)}
+      </>}
+      {sub==="medic"&&<>
+        <div style={S.card}>
+          <FieldRow label="Médicament"><input style={S.input} value={medName} onChange={e=>setMedName(e.target.value)} placeholder="Ex : Doliprane…"/></FieldRow>
+          <FieldRow label="Dose"><input style={S.input} value={medDose} onChange={e=>setMedDose(e.target.value)} placeholder="Ex : 2.5 ml"/></FieldRow>
+          <FieldRow label="Note"><input style={S.input} value={medNote} onChange={e=>setMedNote(e.target.value)} placeholder="Motif, réaction…"/></FieldRow>
+          <button style={S.btn} onClick={()=>{if(!medName)return;setData(d=>({...d,medicines:[...d.medicines,{id:Date.now(),time:nowISO(),name:medName,dose:medDose,note:medNote}]}));setMedName("");setMedDose("");setMedNote("");}}>✅ Enregistrer</button>
+        </div>
+        <div style={S.secTitle}>Médicaments donnés</div>
+        {(data.medicines||[]).length===0&&<div style={S.empty}>Aucun médicament enregistré</div>}
+        {[...(data.medicines||[])].reverse().map(m=><LogItem key={m.id} icon="💊" title={`${m.name}${m.dose?" · "+m.dose:""}`} sub={`${fmtDate(m.time)} à ${fmtTime(m.time)}${m.note?" · "+m.note:""}`} onDelete={()=>setData(d=>({...d,medicines:d.medicines.filter(x=>x.id!==m.id)}))}/>)}
+      </>}
+      {sub==="vaccin"&&<>
+        <div style={S.card}>
+          <FieldRow label="Vaccin"><input style={S.input} value={vacName} onChange={e=>setVacName(e.target.value)} placeholder="Ex : DTCaP, ROR…"/></FieldRow>
+          <FieldRow label="Observations"><input style={S.input} value={vacNote} onChange={e=>setVacNote(e.target.value)} placeholder="Réaction, médecin…"/></FieldRow>
+          <button style={S.btn} onClick={()=>{if(!vacName)return;setData(d=>({...d,vaccines:[...d.vaccines,{id:Date.now(),time:nowISO(),name:vacName,note:vacNote}]}));setVacName("");setVacNote("");}}>✅ Enregistrer</button>
+        </div>
+        <div style={S.secTitle}>Carnet vaccinal</div>
+        {(data.vaccines||[]).length===0&&<div style={S.empty}>Aucun vaccin enregistré</div>}
+        {[...(data.vaccines||[])].reverse().map(v=><LogItem key={v.id} icon="💉" title={v.name} sub={`${fmtDate(v.time)}${v.note?" · "+v.note:""}`} onDelete={()=>setData(d=>({...d,vaccines:d.vaccines.filter(x=>x.id!==v.id)}))}/>)}
+      </>}
+      {sub==="notes"&&<>
+        <div style={S.card}><FieldRow label="Note / observation"><textarea style={S.textarea} value={note} onChange={e=>setNote(e.target.value)} placeholder="Comportement, question pour le pédiatre…"/></FieldRow>
+        <button style={S.btn} onClick={()=>{if(!note.trim())return;setData(d=>({...d,notes:[...d.notes,{id:Date.now(),time:nowISO(),text:note}]}));setNote("");}}>✅ Enregistrer</button></div>
+        {data.notes.length===0&&<div style={S.empty}>Aucune note</div>}
+        {[...data.notes].reverse().map(n=><LogItem key={n.id} icon="📝" title={n.text} sub={`${fmtDate(n.time)} · ${fmtTime(n.time)}`} onDelete={()=>setData(d=>({...d,notes:d.notes.filter(x=>x.id!==n.id)}))}/>)}
+      </>}
+    </div>
+  );
+}
+
+// ─── DEVELOPMENT ──────────────────────────────────────────────────────────────
+function DevTab({data,setData}){
+  const [sub,setSub]=useState("milestones");
+  const [actType,setActType]=useState("Éveil");
+  const [actNote,setActNote]=useState("");
+  const [msText,setMsText]=useState("");
+  return (
+    <div style={S.page}>
+      <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:4}}>
+        {[{k:"milestones",l:"⭐ Étapes"},{k:"activities",l:"🧸 Activités"},{k:"agenda",l:"📅 Agenda"}].map(t=>(
+          <button key={t.k} style={{...S.chip,flex:"0 0 auto",...(sub===t.k?S.chipActive:{})}} onClick={()=>setSub(t.k)}>{t.l}</button>
+        ))}
+      </div>
+      {sub==="milestones"&&<>
+        <div style={S.card}><FieldRow label="Ajouter une étape"><input style={S.input} value={msText} onChange={e=>setMsText(e.target.value)} placeholder="Ex : Premier sourire, tient la tête…"/></FieldRow>
+        <button style={S.btn} onClick={()=>{if(!msText.trim())return;setData(d=>({...d,milestones:[...d.milestones,{id:Date.now(),time:nowISO(),text:msText}]}));setMsText("");}}>✅ Enregistrer</button></div>
+        <div style={S.secTitle}>Étapes franchies 🎉</div>
+        {(data.milestones||[]).length===0&&<div style={S.empty}>Enregistrez les premières fois de bébé !</div>}
+        {[...(data.milestones||[])].reverse().map(m=><LogItem key={m.id} icon="⭐" title={m.text} sub={fmtDate(m.time)} color={C.accentOrange} onDelete={()=>setData(d=>({...d,milestones:d.milestones.filter(x=>x.id!==m.id)}))}/>)}
+      </>}
+      {sub==="activities"&&<>
+        <div style={S.card}>
+          <FieldRow label="Type d'activité"><ChipGroup options={["Éveil","Tummy time","Bain","Lecture","Musique","Promenade","Massage","Jeux"]} value={actType} onChange={setActType}/></FieldRow>
+          <FieldRow label="Note"><input style={S.input} value={actNote} onChange={e=>setActNote(e.target.value)} placeholder="Réaction, durée…"/></FieldRow>
+          <button style={S.btn} onClick={()=>{setData(d=>({...d,activities:[...d.activities,{id:Date.now(),time:nowISO(),type:actType,note:actNote}]}));setActNote("");}}>✅ Enregistrer</button>
+        </div>
+        <div style={S.secTitle}>Activités enregistrées</div>
+        {(data.activities||[]).length===0&&<div style={S.empty}>Aucune activité</div>}
+        {[...(data.activities||[])].reverse().slice(0,15).map(a=>(
+          <LogItem key={a.id} icon={a.type==="Bain"?"🛁":a.type==="Lecture"?"📚":a.type==="Musique"?"🎵":a.type==="Promenade"?"🌤️":a.type==="Massage"?"🤲":"🧸"}
+            title={a.type} sub={`${fmtDate(a.time)} · ${fmtTime(a.time)}${a.note?" · "+a.note:""}`}
+            onDelete={()=>setData(d=>({...d,activities:d.activities.filter(x=>x.id!==a.id)}))}/>
+        ))}
+      </>}
+      {sub==="agenda"&&<>
+        <div style={{...S.card,background:"rgba(91,141,238,0.07)"}}>
+          <div style={{fontSize:13,color:C.textMid,marginBottom:8,fontWeight:700}}>📋 Calendrier vaccinal (France)</div>
+          {[["2 mois","DTCaPolio-Hib-Hep B, Pneumocoque, Méningocoque B"],["4 mois","DTCaPolio-Hib-Hep B, Pneumocoque, Méningocoque B (rappel)"],["5 mois","Méningocoque C"],["11 mois","DTCaPolio-Hib-Hep B (rappel), Pneumocoque, Méningocoque B"],["12 mois","ROR, Méningocoque C (rappel)"],["16-18 mois","ROR rappel"]].map(([age,v])=>(
+            <div key={age} style={{padding:"9px 0",borderBottom:`1px solid ${C.border}`,display:"flex",gap:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.accent,width:65,flexShrink:0}}>{age}</div>
+              <div style={{fontSize:12,color:C.textMid}}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={S.card}>
+          <div style={{fontSize:13,color:C.textMid,marginBottom:8,fontWeight:700}}>📅 Visites médicales obligatoires</div>
+          {[["J8","Sage-femme à domicile"],["1 mois","Pédiatre — exam. obligatoire"],["2 mois","Pédiatre + vaccins"],["9 mois","Pédiatre — exam. obligatoire"],["24 mois","Pédiatre — exam. obligatoire"],["Crèche","Visite d'admission"],["3 ans","Avant école maternelle"]].map(([t,d])=>(
+            <div key={t} style={{padding:"9px 0",borderBottom:`1px solid ${C.border}`,display:"flex",gap:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.accentGreen,width:65,flexShrink:0}}>{t}</div>
+              <div style={{fontSize:12,color:C.textMid}}>{d}</div>
+            </div>
+          ))}
+        </div>
+      </>}
+    </div>
+  );
+}
+
+// ─── CHECKLIST ────────────────────────────────────────────────────────────────
+function ChecklistTab({data,setData}){
+  const [view,setView]=useState("daily");
+  const items=data.checklist[view]||[];
+  const done=items.filter(i=>i.done).length;
+  const pct=items.length>0?Math.round(done/items.length*100):0;
+  const toggle=id=>setData(d=>({...d,checklist:{...d.checklist,[view]:d.checklist[view].map(i=>i.id===id?{...i,done:!i.done}:i)}}));
+  const reset=()=>setData(d=>({...d,checklist:{...d.checklist,[view]:d.checklist[view].map(i=>({...i,done:false}))}}));
+  return (
+    <div style={S.page}>
+      <div style={{display:"flex",gap:7}}>
+        {[{k:"daily",l:"☀️ Quotidien"},{k:"weekly",l:"📅 Hebdo"},{k:"milestonesList",l:"🎯 Étapes"}].map(t=>(
+          <button key={t.k} style={{...S.chip,flex:1,...(view===t.k?S.chipActive:{})}} onClick={()=>setView(t.k)}>{t.l}</button>
+        ))}
+      </div>
+      <div style={S.card}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+          <span style={{fontSize:13,color:C.textMid}}>{done}/{items.length} complétés</span>
+          <span style={{fontSize:20,fontWeight:800,color:pct===100?C.accentGreen:C.accent}}>{pct}%</span>
+        </div>
+        <div style={S.progressBar}><div style={{...S.progressFill,width:`${pct}%`,background:pct===100?C.accentGreen:C.accent}}/></div>
+        {pct===100&&<div style={{textAlign:"center",marginTop:10,color:C.accentGreen,fontWeight:700}}>🎉 Tout est fait, bravo !</div>}
+      </div>
+      {items.map(item=>(
+        <button key={item.id} style={{...S.logRow,cursor:"pointer",border:`1px solid ${item.done?"rgba(78,203,126,0.25)":C.border}`,background:item.done?"rgba(78,203,126,0.05)":C.surface,width:"100%",textAlign:"left",fontFamily:"inherit"}} onClick={()=>toggle(item.id)}>
+          <span style={{...S.logIcon}}>{item.icon}</span>
+          <span style={{flex:1,fontSize:13,fontWeight:600,color:item.done?C.textDim:C.text,textDecoration:item.done?"line-through":"none"}}>{item.label}</span>
+          <span style={{fontSize:18}}>{item.done?"✅":"⬜"}</span>
+        </button>
+      ))}
+      <button style={S.btnOutline} onClick={reset}>🔄 Tout réinitialiser</button>
+    </div>
+  );
+}
+
+// ─── SAVE/LOAD ────────────────────────────────────────────────────────────────
+function SaveTab({data,setData}){
+  const [msg,setMsg]=useState(null);
+  const fileRef=useRef();
+  const showMsg=(type,text)=>{setMsg({type,text});setTimeout(()=>setMsg(null),3500);};
+
+  const exportData=()=>{
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`bebelog_${data.babyName.replace(/\s/g,"_")}_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showMsg("success","✅ Sauvegarde téléchargée !");
+  };
+  const importData=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{const parsed=JSON.parse(ev.target.result);setData(parsed);showMsg("success","✅ Données chargées !");}
+      catch{showMsg("error","❌ Fichier invalide.");}
+    };
+    reader.readAsText(file);e.target.value="";
+  };
+  const resetData=()=>{
+    if(window.confirm("Effacer TOUTES les données ? Cette action est irréversible."))
+      {setData(INITIAL);showMsg("success","✅ Données réinitialisées.");}
+  };
+  const stats=[["🍼 Repas",data.feeds.length],["😴 Sommeils",data.sleeps.length],["💩 Couches",data.diapers.length],["⚖️ Pesées",data.weights.length],["🌡️ Températures",data.temps.length],["💊 Médicaments",(data.medicines||[]).length],["💉 Vaccins",(data.vaccines||[]).length],["⭐ Étapes",(data.milestones||[]).length],["🧸 Activités",(data.activities||[]).length],["📝 Notes",data.notes.length]];
+  return (
+    <div style={S.page}>
+      <div style={S.secTitle}>Données enregistrées</div>
+      <div style={{...S.card,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        {stats.map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>
+            <span style={{color:C.textMid}}>{l}</span>
+            <span style={{fontWeight:700,color:C.accent}}>{v}</span>
+          </div>
+        ))}
+      </div>
+      {msg&&<div style={msg.type==="success"?S.success:S.alert}>{msg.text}</div>}
+      <div style={S.secTitle}>Sauvegarder</div>
+      <div style={S.card}>
+        <p style={{fontSize:13,color:C.textMid,margin:"0 0 10px"}}>Exportez vos données dans un fichier JSON. Sauvegardez-le sur Google Drive, iCloud, email…</p>
+        <button style={S.btn} onClick={exportData}>📥 Télécharger la sauvegarde (.json)</button>
+      </div>
+      <div style={S.secTitle}>Charger une sauvegarde</div>
+      <div style={S.card}>
+        <p style={{fontSize:13,color:C.textMid,margin:"0 0 10px"}}>Rechargez une sauvegarde précédente. Les données actuelles seront remplacées.</p>
+        <input type="file" accept=".json" ref={fileRef} style={{display:"none"}} onChange={importData}/>
+        <button style={{...S.btn,...S.btnOrange}} onClick={()=>fileRef.current.click()}>📂 Charger un fichier (.json)</button>
+      </div>
+      <div style={S.secTitle}>Réinitialiser</div>
+      <div style={S.card}>
+        <p style={{fontSize:13,color:C.textMid,margin:"0 0 10px"}}>⚠️ Efface toutes les données définitivement.</p>
+        <button style={{...S.btn,...S.btnDanger}} onClick={resetData}>🗑️ Réinitialiser toutes les données</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── SUPPORT ──────────────────────────────────────────────────────────────────
+function SupportTab(){
+  const [copied,setCopied]=useState(false);
+  const copyBTC=()=>{
+    navigator.clipboard.writeText(BTC_ADDRESS).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});
+  };
+  return (
+    <div style={S.page}>
+      <div style={{...S.cardGlow,textAlign:"center",padding:"24px 16px"}}>
+        <div style={{fontSize:46}}>💛</div>
+        <div style={{fontSize:19,fontWeight:800,marginTop:10,marginBottom:8}}>Soutenir BébéLog</div>
+        <p style={{fontSize:13,color:C.textMid,lineHeight:1.6,margin:0}}>BébéLog est gratuit et sans publicité. Si cette app vous aide avec votre bébé, vous pouvez soutenir son développement — merci du fond du cœur ! 🙏</p>
+      </div>
+      <div style={S.secTitle}>☕ Offrir un café (Ko-fi)</div>
+      <div style={S.card}>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+          <div style={{fontSize:40}}>☕</div>
+          <div><div style={{fontWeight:700,fontSize:15}}>Ko-fi</div><div style={{fontSize:12,color:C.textMid,marginTop:2}}>Paiement par carte, PayPal…</div></div>
+        </div>
+        <a href={KOFI_URL} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none"}}>
+          <button style={{...S.btn,background:"linear-gradient(135deg,#ff5f5f,#ff9344)",fontSize:15}}>☕ Soutenir sur Ko-fi</button>
+        </a>
+        <div style={{textAlign:"center",marginTop:8,fontSize:11,color:C.textDim}}>{KOFI_URL}</div>
+      </div>
+      <div style={S.secTitle}>₿ Donation en Bitcoin</div>
+      <div style={S.card}>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+          <div style={{fontSize:40}}>₿</div>
+          <div><div style={{fontWeight:700,fontSize:15}}>Bitcoin (BTC)</div><div style={{fontSize:12,color:C.textMid,marginTop:2}}>Copiez l'adresse depuis votre wallet</div></div>
+        </div>
+        <div style={{background:"#060b15",borderRadius:10,padding:"12px 14px",fontFamily:"monospace",fontSize:11,color:C.accentOrange,wordBreak:"break-all",marginBottom:10,border:"1px solid rgba(247,147,26,0.25)",lineHeight:1.8,letterSpacing:"0.3px"}}>
+          {BTC_ADDRESS}
+        </div>
+        <button style={{...S.btn,background:"linear-gradient(135deg,#f7931a,#e07b00)"}} onClick={copyBTC}>
+          {copied?"✅ Adresse copiée !":"📋 Copier l'adresse Bitcoin"}
+        </button>
+      </div>
+      <div style={{...S.card,textAlign:"center",background:"rgba(91,141,238,0.05)"}}>
+        <div style={{fontSize:30,marginBottom:8}}>👶✨</div>
+        <p style={{fontSize:13,color:C.textMid,lineHeight:1.7,margin:0}}>Merci d'utiliser BébéLog. Cette app a été créée avec amour pour aider les nouveaux parents dans ces premiers mois précieux. Chaque contribution aide à maintenir et améliorer l'application.</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ROOT ─────────────────────────────────────────────────────────────────
+const TABS = [
+  { label:"🏠", full:"Accueil",  component:(d,s)=><HomeTab data={d} setData={s}/> },
+  { label:"🍼", full:"Repas",    component:(d,s)=><FeedTab data={d} setData={s}/> },
+  { label:"🌙", full:"Sommeil",  component:(d,s)=><SleepTab data={d} setData={s}/> },
+  { label:"❤️", full:"Santé",    component:(d,s)=><HealthTab data={d} setData={s}/> },
+  { label:"🌱", full:"Éveil",    component:(d,s)=><DevTab data={d} setData={s}/> },
+  { label:"✅", full:"Routine",  component:(d,s)=><ChecklistTab data={d} setData={s}/> },
+  { label:"💾", full:"Données",  component:(d,s)=><SaveTab data={d} setData={s}/> },
+  { label:"💛", full:"Soutien",  component:()=><SupportTab/> },
+];
+
+function App() {
+  const [tab,  setTab]  = useState(0);
+  // Load from localStorage on init
+  const [data, setData] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : INITIAL;
+    } catch { return INITIAL; }
+  });
+
+  // Auto-save to localStorage on every change
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) { console.warn("Storage full", e); }
+  }, [data]);
+
+  return (
+    <div style={S.app}>
+      <div style={S.header}>
+        <div style={S.headerTop}>
+          <div style={S.headerLogo}>👶</div>
+          <div>
+            <div style={S.headerTitle}>BébéLog</div>
+            <div style={S.headerSub}>Votre compagnon pour les premiers mois</div>
+          </div>
+          {data.birthDate&&(
+            <div style={{marginLeft:"auto",textAlign:"right"}}>
+              <div style={{fontSize:10,color:C.textDim}}>Âge</div>
+              <div style={{fontSize:12,fontWeight:700,color:C.accent}}>{getAge(data.birthDate)}</div>
+            </div>
+          )}
+        </div>
+        <div style={S.navRow}>
+          {TABS.map((t,i)=>(
+            <button key={i} style={{...S.navBtn,...(tab===i?S.navBtnActive:{})}} onClick={()=>setTab(i)}>
+              {t.label} {t.full}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={S.scroll}>
+        {TABS[tab].component(data, setData)}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+// ─── PWA: Service Worker Registration ────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.log('SW error:', err));
+  });
+}
+
+// ─── PWA: Install Banner ──────────────────────────────────────────────────────
+let deferredPrompt = null;
+const banner    = document.getElementById('install-banner');
+const installBtn = document.getElementById('install-btn');
+const dismissBtn = document.getElementById('install-dismiss');
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Show banner after 3s
+  setTimeout(() => banner.classList.add('show'), 3000);
+});
+
+installBtn.addEventListener('click', async () => {
+  banner.classList.remove('show');
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log('Install outcome:', outcome);
+    deferredPrompt = null;
+  }
+});
+
+dismissBtn.addEventListener('click', () => {
+  banner.classList.remove('show');
+  deferredPrompt = null;
+});
+
+window.addEventListener('appinstalled', () => {
+  console.log('BébéLog installed!');
+  banner.classList.remove('show');
+});
+
+// ─── Splash Screen ────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const splash = document.getElementById('splash');
+    if (splash) {
+      splash.classList.add('fade');
+      setTimeout(() => splash.remove(), 400);
+    }
+  }, 1200);
+});
+</script>
+</body>
+</html>
